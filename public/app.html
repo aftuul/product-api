@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manajemen Produk</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--text:#1c1f26;--muted:#6b7280;--line:#e3e6eb;--brand:#2563eb;--brand-h:#1d4ed8;--ok:#15803d;--err:#b91c1c;--okbg:#dcfce7;--errbg:#fee2e2;--code:#f0f2f5}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1218;--card:#181c24;--text:#e8eaee;--muted:#98a0ad;--line:#2a303b;--brand:#3b82f6;--brand-h:#60a5fa;--ok:#4ade80;--err:#f87171;--okbg:#0f2e1a;--errbg:#3a1414;--code:#10141b}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text)}
+.wrap{max-width:960px;margin:0 auto;padding:24px 16px 48px}
+header{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center;margin-bottom:20px}
+h1{font-size:22px;margin:0}h2{font-size:16px;margin:0 0 12px}
+.sub{color:var(--muted);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+input{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+input:focus{outline:2px solid var(--brand);outline-offset:-1px}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:8px;padding:8px 14px}
+button:hover{border-color:var(--brand)}
+.primary{background:var(--brand);border-color:var(--brand);color:#fff}.primary:hover{background:var(--brand-h)}
+.danger{color:var(--err)}
+.grow{flex:1;min-width:180px}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+td.num,th.num{text-align:right}td.act{text-align:right}
+td.act button{padding:5px 10px;font-size:13px;margin-left:4px}
+.state{padding:32px 8px;text-align:center;color:var(--muted)}
+.state.error{color:var(--err)}
+.spin{display:inline-block;width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:s .7s linear infinite;vertical-align:-4px;margin-right:8px}
+@keyframes s{to{transform:rotate(360deg)}}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--text);padding:20px;width:min(420px,92vw)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+label{display:block;font-size:13px;margin:12px 0 4px}
+.ferr{color:var(--err);font-size:12px;margin-top:3px;min-height:0}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:8px;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><h1>Manajemen Produk</h1><div class="sub">Kelola data produk: nama, harga, dan stok</div></div>
+    <div class="row"><button id="btnLoad">Muat Ulang</button><button class="primary" id="btnAdd">+ Tambah Produk</button></div>
+  </header>
+
+  <div class="card">
+    <div class="row" style="margin-bottom:12px">
+      <h2 style="margin:0" class="grow">Daftar Produk <span class="sub" id="count"></span></h2>
+      <input id="q" style="max-width:220px" placeholder="Cari nama…" aria-label="Cari">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Nama</th><th class="num">Harga</th><th class="num">Stok</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div id="state" class="state"></div>
+  </div>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <h2 id="dlgTitle">Tambah Produk</h2>
+  <label for="fName">Nama</label><input id="fName"><div class="ferr" id="eName"></div>
+  <label for="fPrice">Harga (Rp)</label><input id="fPrice" type="number" min="0"><div class="ferr" id="ePrice"></div>
+  <label for="fStock">Stok</label><input id="fStock" type="number" min="0"><div class="ferr" id="eStock"></div>
+  <div class="row" style="justify-content:flex-end;margin-top:18px">
+    <button id="btnCancel">Batal</button><button class="primary" id="btnSave">Simpan</button>
+  </div>
+</dialog>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const fmt = n => new Intl.NumberFormat('id-ID').format(n);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let items = [], editId = null;
+
+// Server API (tersembunyi): kosong = server yang sama. Untuk server lain buka halaman dengan ?api=https://alamat-server
+const BASE = (new URLSearchParams(location.search).get('api') || '').trim().replace(/\/+$/, '');
+// Log request (tersembunyi): tersimpan di window.apiLog dan tampil di Console browser (F12)
+window.apiLog = [];
+
+
+function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200)}
+
+async function api(method, path, body){
+  const url = BASE + '/api' + path, t0 = performance.now();
+  let status = 0, data = null;
+  try{
+    const res = await fetch(url, {method, headers:{'Accept':'application/json','Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined});
+    status = res.status;
+    const txt = await res.text();
+    try{ data = txt ? JSON.parse(txt) : null }catch{ data = txt }
+  }catch(e){ data = {error:'Tidak dapat terhubung ke server', detail:String(e)} }
+  const entry = {waktu: new Date().toLocaleTimeString('id-ID'), method, url, status: status || 'ERR', ms: Math.round(performance.now()-t0), body: body || null, response: data};
+  window.apiLog.unshift(entry); if(window.apiLog.length > 50) window.apiLog.pop();
+  console.log(`[API] ${method} ${url} -> ${entry.status} (${entry.ms} ms)`, {body: entry.body, response: data});
+  return {ok: status>=200 && status<300, status, data};
+}
+
+function render(){
+  const q = $('#q').value.toLowerCase();
+  const list = items.filter(p => p.name.toLowerCase().includes(q));
+  $('#rows').innerHTML = list.map(p => `<tr><td>${p.id}</td><td>${esc(p.name)}</td><td class="num">Rp ${fmt(p.price)}</td><td class="num">${fmt(p.stock)}</td>`
+    + `<td class="act"><button data-e="${p.id}">Ubah</button><button class="danger" data-d="${p.id}">Hapus</button></td></tr>`).join('');
+  $('#count').textContent = items.length ? `(${list.length}/${items.length})` : '';
+  const st = $('#state'); st.className='state';
+  st.textContent = list.length ? '' : (items.length ? 'Tidak ada produk yang cocok.' : 'Data tidak tersedia. Klik "Tambah Produk".');
+}
+
+async function load(){
+  const st = $('#state'); $('#rows').innerHTML=''; st.className='state';
+  st.innerHTML = '<span class="spin"></span>Memuat data… (server gratis bisa lambat saat pertama diakses)';
+  const r = await api('GET','/products');
+  if(!r.ok){ items=[]; st.className='state error'; st.textContent = 'Gagal memuat data' + (r.status?` (HTTP ${r.status})`:': server tidak dapat dihubungi'); return }
+  items = Array.isArray(r.data) ? r.data : []; render();
+}
+
+function openForm(p){
+  editId = p ? p.id : null;
+  $('#dlgTitle').textContent = p ? 'Ubah Produk' : 'Tambah Produk';
+  $('#fName').value = p ? p.name : ''; $('#fPrice').value = p ? p.price : ''; $('#fStock').value = p ? p.stock : '';
+  ['Name','Price','Stock'].forEach(k => $('#e'+k).textContent='');
+  $('#dlg').showModal(); $('#fName').focus();
+}
+
+async function save(){
+  const body = {name:$('#fName').value, price:$('#fPrice').value===''?null:Number($('#fPrice').value), stock:$('#fStock').value===''?null:Number($('#fStock').value)};
+  const btn = $('#btnSave'); btn.disabled = true;
+  const r = editId ? await api('PUT','/products/'+editId, body) : await api('POST','/products', body);
+  btn.disabled = false;
+  if(r.ok){ $('#dlg').close(); toast(editId?'Produk diubah':'Produk ditambahkan'); load(); return }
+  const errs = (r.data && r.data.errors) || {};
+  $('#eName').textContent = (errs.name||[])[0]||''; $('#ePrice').textContent = (errs.price||[])[0]||''; $('#eStock').textContent = (errs.stock||[])[0]||'';
+  if(!r.data || !r.data.errors) toast('Gagal menyimpan (HTTP '+(r.status||'ERR')+')');
+}
+
+async function del(id){
+  const p = items.find(x => x.id == id);
+  if(!confirm(`Hapus "${p ? p.name : id}"?`)) return;
+  const r = await api('DELETE','/products/'+id);
+  toast(r.ok ? 'Produk dihapus' : 'Gagal menghapus (HTTP '+(r.status||'ERR')+')'); if(r.ok) load();
+}
+
+$('#btnAdd').onclick = () => openForm(null);
+$('#btnLoad').onclick = load;
+$('#btnCancel').onclick = () => $('#dlg').close();
+$('#btnSave').onclick = save;
+$('#q').oninput = render;
+$('#rows').onclick = e => {
+  const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.e) openForm(items.find(x => x.id == b.dataset.e));
+  if(b.dataset.d) del(b.dataset.d);
+};
+load();
+</script>
+</body>
+</html>
